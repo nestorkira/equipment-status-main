@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+Captura de pantalla*.png
+Estado de equipos - A.xlsx
+equipment-status-main/
+pipeline/generar_datos_demo.py

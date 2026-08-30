@@ -1,0 +1,54 @@
+name: Pipeline Diario ML
+
+on:
+  schedule:
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+
+jobs:
+  pipeline-diario:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clonar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: pip install -r pipeline/requirements.txt
+
+      - name: Extraer datos de Odoo (ultimos 14 dias)
+        env:
+          ODOO_URL: ${{ secrets.ODOO_URL }}
+          ODOO_DB: ${{ secrets.ODOO_DB }}
+          ODOO_USER: ${{ secrets.ODOO_USER }}
+          ODOO_PASSWORD: ${{ secrets.ODOO_PASSWORD }}
+        run: python pipeline/extraer_odoo.py
+
+      - name: Consolidar historico
+        run: python pipeline/consolidar.py
+
+      - name: Generar snapshots por hora de corte
+        run: python pipeline/generar_snapshots.py
+
+      - name: Entrenar y evaluar modelos
+        run: python pipeline/entrenar.py
+
+      - name: Guardar artefactos de respaldo
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: metricas-del-dia
+          path: metrics/metricas.csv
+
+      - name: Commit y push de datos, modelos y metricas
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data models metrics
+          git diff --cached --quiet || git commit -m "pipeline diario $(date -u +'%Y-%m-%d %H:%M UTC')"
+          git push
