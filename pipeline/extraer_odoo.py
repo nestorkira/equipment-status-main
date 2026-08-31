@@ -29,52 +29,45 @@ try:
     models = xmlrpc.client.ServerProxy(f"{url}/xmlrpc/2/object")
     print("UID:", uid)
 
-    fecha_fin = datetime.now(timezone.utc).replace(tzinfo=None)
-    fecha_ini = fecha_fin - timedelta(days=14)
-    fecha_ini_str = fecha_ini.strftime("%Y-%m-%d")
-    fecha_fin_str = fecha_fin.strftime("%Y-%m-%d")
+    MODELO_ODOO = "project.steel.report"
+
+    CONTRACTS = [
+        "Mina Bambas Rotativas - Ferrobamba",
+        "Mina Bambas Rotativas - Chalcobamba",
+        "Mina Bambas",
+    ]
+
+    fecha_ini_str = "2026-04-30"
+    fecha_fin_str = "2026-08-31"
     print(f"Rango solicitado: {fecha_ini_str} -> {fecha_fin_str}")
 
-    DIALES_RANGO_AMPLIO = [
-        ("2025-01-01", "2025-03-31"),
-        ("2025-04-01", "2025-06-30"),
-        ("2025-07-01", "2025-08-31"),
-        ("2025-09-01", fecha_fin_str),
-    ]
-    print("Verificando rangos disponibles en Odoo...")
-    for di, df_r in DIALES_RANGO_AMPLIO:
-        dom_check = [
-            ("date", ">=", di),
-            ("date", "<=", df_r),
-            ("contract", "in", [
-                "Mina Bambas Rotativas - Ferrobamba",
-                "Mina Bambas Rotativas - Chalcobamba",
-                "Mina Bambas",
-            ]),
-        ]
+    print("Verificando registros por mes...")
+    for year, month in [(2026, 4), (2026, 5), (2026, 6), (2026, 7), (2026, 8)]:
+        import calendar
+        last_day = calendar.monthrange(year, month)[1]
+        di = f"{year}-{month:02d}-01"
+        df_r = f"{year}-{month:02d}-{last_day:02d}"
+        if di < fecha_ini_str:
+            di = fecha_ini_str
+        if df_r > fecha_fin_str:
+            df_r = fecha_fin_str
+        if di > df_r:
+            continue
+        dom_check = [("date", ">=", di), ("date", "<=", df_r), ("contract", "in", CONTRACTS)]
         cnt = models.execute_kw(db, uid, password, MODELO_ODOO, "search_count", [dom_check])
-        print(f"  {di} -> {df_r}: {cnt} registros")
+        print(f"  {di} a {df_r}: {cnt} registros")
 
     domain = [
         ("date", ">=", fecha_ini_str),
         ("date", "<=", fecha_fin_str),
-        (
-            "contract",
-            "in",
-            [
-                "Mina Bambas Rotativas - Ferrobamba",
-                "Mina Bambas Rotativas - Chalcobamba",
-                "Mina Bambas",
-            ],
-        ),
+        ("contract", "in", CONTRACTS),
     ]
-
-    MODELO_ODOO = "project.steel.report"
 
     FIELDS_LIST = [
         "id", "contract", "date", "shift", "area", "block", "equipo",
         "bank", "project", "drill_type", "drill_code",
         "hour_from", "hour_to", "rop", "hardness", "high",
+        "terrain", "operator", "machine",
     ]
 
     def safe_read_batch(model, ids_batch):
@@ -94,16 +87,18 @@ try:
             return left + right
 
     count = models.execute_kw(db, uid, password, MODELO_ODOO, "search_count", [domain])
-    print("Total registros:", count)
+    print(f"Total registros a extraer: {count}")
 
     inicio = time.time()
     ids = models.execute_kw(db, uid, password, MODELO_ODOO, "search", [domain])
+    print(f"IDs obtenidos: {len(ids)}")
 
     registros = []
     batch_size = 1000
     for i in range(0, len(ids), batch_size):
         batch_ids = ids[i : i + batch_size]
-        print(f"Leyendo {i} - {i + len(batch_ids)}")
+        pct = round((i + len(batch_ids)) / len(ids) * 100, 1)
+        print(f"Leyendo {i}-{i + len(batch_ids)} ({pct}%)")
         data = safe_read_batch(MODELO_ODOO, batch_ids)
         registros.extend(data)
 
@@ -113,23 +108,37 @@ try:
     if df.empty:
         print("ERROR: no se recuperaron registros de Odoo")
         sys.exit(1)
-    print("Columnas obtenidas:", list(df.columns))
+    print(f"Registros obtenidos: {len(df)}")
+    print(f"Columnas: {list(df.columns)}")
 
-    for col in ["hour_from", "hour_to", "rop", "hardness", "high"]:
+    for col in ["hour_from", "hour_to", "rop", "high"]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
+    if "hardness" in df.columns:
+        df["hardness"] = df["hardness"].fillna("N/A")
+        df["hardness"] = df["hardness"].replace("False", "N/A")
+        df["hardness"] = df["hardness"].replace(False, "N/A")
+        print(f"Hardness valores: {df['hardness'].value_counts().to_dict()}")
+
+    if "terrain" in df.columns:
+        df["terrain"] = df["terrain"].fillna("N/A")
+        df["terrain"] = df["terrain"].replace("False", "N/A")
+        df["terrain"] = df["terrain"].replace(False, "N/A")
+        print(f"Terrain valores: {df['terrain'].value_counts().to_dict()}")
+
     if "date" in df.columns:
         fechas = sorted(df["date"].dropna().unique())
-        print(f"Fechas unicas en Odoo ({len(fechas)}): {fechas[:5]} ... {fechas[-5:]}" if len(fechas) > 10 else f"Fechas unicas: {fechas}")
+        print(f"Fechas unicas ({len(fechas)}): {fechas[:3]} ... {fechas[-3:]}")
 
     df = df[df["drill_code"].notna()]
     df = df[df["drill_code"] != False]
     df = df[df["drill_code"] != ""]
+    print(f"Despues de filtrar drill_code vacio: {len(df)} registros")
 
     ruta_detalle = DATA_DIR / "detalle_diario.csv"
     df.to_csv(ruta_detalle, index=False)
-    print(f"Detalle guardado en: {ruta_detalle} | filas: {len(df)}")
+    print(f"Detalle guardado: {ruta_detalle} | filas: {len(df)}")
 
     duracion = df["hour_to"] - df["hour_from"]
     df_tmp = df.assign(duracion=duracion.where(duracion >= 0, duracion + 24))
@@ -140,14 +149,13 @@ try:
             horas_trabajadas=("duracion", "sum"),
             metros_fin_turno=("high", "sum"),
             rop_promedio=("rop", "mean"),
-            dureza_promedio=("hardness", "mean"),
         )
     )
     resumen["Horas Trabajadas"] = resumen["horas_trabajadas"].round(2)
     resumen["Metros"] = resumen["metros_fin_turno"].round(2)
     ruta_resumen = DATA_DIR / "resumen_diario.xlsx"
     resumen.to_excel(ruta_resumen, index=False)
-    print(f"Resumen guardado en: {ruta_resumen} | filas: {len(resumen)}")
+    print(f"Resumen guardado: {ruta_resumen} | filas: {len(resumen)}")
 
 except Exception as e:
     print("ERROR FATAL en extraer_odoo.py:")

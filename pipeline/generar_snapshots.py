@@ -36,13 +36,19 @@ try:
         sys.exit(1)
 
     df = pd.read_csv(HISTORICO)
-    REQUIRED = {"date", "shift", "equipo", "area", "hour_from", "hour_to", "high", "hardness"}
+    REQUIRED = {"date", "shift", "equipo", "area", "hour_from", "hour_to", "high"}
     if not REQUIRED.issubset(set(df.columns)):
         print(f"ERROR: columnas faltantes en historico: {REQUIRED - set(df.columns)}")
         sys.exit(1)
 
     df["zona"] = df["area"].apply(zona_de)
     df["tipo"] = df["equipo"].apply(lambda x: "RTR" if x in EQUIPOS_RTR else "DTH")
+    if "hardness" in df.columns:
+        df["hardness"] = df["hardness"].fillna("N/A")
+        df["hardness"] = df["hardness"].replace("False", "N/A")
+        df["hardness"] = df["hardness"].replace(False, "N/A")
+    else:
+        df["hardness"] = "N/A"
     duracion = df["hour_to"] - df["hour_from"]
     df["duracion_min"] = duracion.where(duracion >= 0, duracion + 24) * 60
 
@@ -51,7 +57,8 @@ try:
         inicio = INICIO_TURNO[turno]
         zona = g["zona"].iloc[0]
         tipo = g["tipo"].iloc[0]
-        dureza_prom = g["hardness"].mean()
+        hardness_mode = g["hardness"].mode()
+        dureza_prom = hardness_mode.iloc[0] if len(hardness_mode) > 0 else "N/A"
         intervalos = []
         for _, r in g.iterrows():
             ini_rel = minutos_desde_inicio(r["hour_from"], inicio)
@@ -90,7 +97,7 @@ try:
                 "horas_acum": round(horas_acum, 3),
                 "taladros_acum": taladros_acum, "metros_acum": round(metros_acum, 2),
                 "rop_prom": round(rop_pond / pesos_rop, 2) if pesos_rop > 0 else 0.0,
-                "dureza_prom": round(dureza_prom, 2),
+                "dureza": dureza_prom,
                 "horas_restantes": round((DURACION_TURNO_MIN - corte) / 60.0, 2),
                 "metros_al_corte": acum_al_corte,
                 "metros_fin_turno": round(total_metros, 2),

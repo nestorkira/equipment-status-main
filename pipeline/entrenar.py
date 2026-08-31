@@ -27,9 +27,9 @@ CORTE_OFICIAL_MIN = 330
 FRACCION_TEST_DIAS = 0.2
 FEATURES_NUM = [
     "corte_min", "horas_acum", "taladros_acum", "metros_acum",
-    "rop_prom", "dureza_prom", "horas_restantes",
+    "rop_prom", "horas_restantes",
 ]
-FEATURES_CAT = ["equipo", "tipo", "zona", "turno"]
+FEATURES_CAT = ["equipo", "tipo", "zona", "turno", "dureza"]
 MODELOS = {
     "RegresionLineal": lambda: LinearRegression(),
     "RandomForest": lambda: RandomForestRegressor(

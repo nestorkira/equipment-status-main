@@ -1,3 +1,0 @@
-fecha_entrenamiento,modelo,target,mejor_algoritmo,metricas_test,n_train,n_test
-2026-08-31 14:04:25,corte,metros_al_corte,RandomForest,"{""RandomForest"": {""MAE"": 11.747, ""RMSE"": 20.977, ""MAPE"": 72.08, ""R2"": 0.7185}}",708,84
-2026-08-31 14:04:25,fin,metros_fin_turno,RandomForest,"{""RandomForest"": {""MAE"": 69.468, ""RMSE"": 93.466, ""MAPE"": 109.43, ""R2"": -0.0163}}",1416,168
