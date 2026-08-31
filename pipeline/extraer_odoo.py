@@ -33,7 +33,27 @@ try:
     fecha_ini = fecha_fin - timedelta(days=14)
     fecha_ini_str = fecha_ini.strftime("%Y-%m-%d")
     fecha_fin_str = fecha_fin.strftime("%Y-%m-%d")
-    print(f"Rango: {fecha_ini_str} -> {fecha_fin_str}")
+    print(f"Rango solicitado: {fecha_ini_str} -> {fecha_fin_str}")
+
+    DIALES_RANGO_AMPLIO = [
+        ("2025-01-01", "2025-03-31"),
+        ("2025-04-01", "2025-06-30"),
+        ("2025-07-01", "2025-08-31"),
+        ("2025-09-01", fecha_fin_str),
+    ]
+    print("Verificando rangos disponibles en Odoo...")
+    for di, df_r in DIALES_RANGO_AMPLIO:
+        dom_check = [
+            ("date", ">=", di),
+            ("date", "<=", df_r),
+            ("contract", "in", [
+                "Mina Bambas Rotativas - Ferrobamba",
+                "Mina Bambas Rotativas - Chalcobamba",
+                "Mina Bambas",
+            ]),
+        ]
+        cnt = models.execute_kw(db, uid, password, MODELO_ODOO, "search_count", [dom_check])
+        print(f"  {di} -> {df_r}: {cnt} registros")
 
     domain = [
         ("date", ">=", fecha_ini_str),
@@ -98,6 +118,10 @@ try:
     for col in ["hour_from", "hour_to", "rop", "hardness", "high"]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    if "date" in df.columns:
+        fechas = sorted(df["date"].dropna().unique())
+        print(f"Fechas unicas en Odoo ({len(fechas)}): {fechas[:5]} ... {fechas[-5:]}" if len(fechas) > 10 else f"Fechas unicas: {fechas}")
 
     df = df[df["drill_code"].notna()]
     df = df[df["drill_code"] != False]
