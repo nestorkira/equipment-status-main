@@ -13,11 +13,17 @@ print("=" * 70)
 df = pd.read_csv(DATA / "detalle_diario.csv", low_memory=False)
 print(f"Registros originales: {len(df)}")
 
-# 1. ROP 15-75
+# 1. ROP 15-75 (trimming operativo) + winsorizing 1%-99% (capping)
 df["rop"] = pd.to_numeric(df["rop"], errors="coerce")
 antes = len(df)
 df = df[(df["rop"] >= 15) & (df["rop"] <= 75)]
-print(f"ROP 15-75: {antes} -> {len(df)} (-{antes - len(df)})")
+print(f"ROP 15-75 trimming: {antes} -> {len(df)} (-{antes - len(df)})")
+lo, hi = df["rop"].quantile([0.01, 0.99])
+print(f"ROP winsorizing 1%-99%: [{lo:.2f}, {hi:.2f}] -> clip")
+n_low = (df["rop"] < lo).sum()
+n_high = (df["rop"] > hi).sum()
+df["rop"] = df["rop"].clip(lo, hi)
+print(f"  cap low <{lo:.2f}: {n_low} | cap high >{hi:.2f}: {n_high} | nuevo max={df['rop'].max():.2f} min={df['rop'].min():.2f}")
 
 # 2. High (metros) razonable
 df["high"] = pd.to_numeric(df["high"], errors="coerce")

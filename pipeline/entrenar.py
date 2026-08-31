@@ -7,7 +7,7 @@ from pathlib import Path
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
+from sklearn.ensemble import GradientBoostingRegressor, HistGradientBoostingRegressor, RandomForestRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import (
     mean_absolute_error,
@@ -39,6 +39,9 @@ MODELOS = {
     ),
     "GradientBoosting": lambda: GradientBoostingRegressor(
         n_estimators=300, max_depth=5, learning_rate=0.1, random_state=42
+    ),
+    "HistGradientBoosting": lambda: HistGradientBoostingRegressor(
+        max_iter=300, max_depth=5, learning_rate=0.1, random_state=42
     ),
     "RedNeuronal": lambda: make_pipeline(
         StandardScaler(),
