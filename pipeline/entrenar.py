@@ -86,8 +86,8 @@ def entrenar_objetivo(nombre, df, target):
     if len(common_cols) < len(X_train.columns):
         print(f"ADVERTENCIA: columnas no coinciden en '{nombre}'. Se reentrena con union.")
         all_cols = X_train.columns.union(X_test.columns)
-        X_train = X_train[all_cols]
-        X_test = X_test[all_cols]
+        X_train = X_train.reindex(columns=all_cols, fill_value=0)
+        X_test = X_test.reindex(columns=all_cols, fill_value=0)
     y_train, y_test = train[target].values, test[target].values
 
     resultados = {}
