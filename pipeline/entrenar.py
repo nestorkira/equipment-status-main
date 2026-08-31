@@ -25,17 +25,21 @@ MODELOS_DIR = BASE / "models"
 METRICAS_PATH = BASE / "metrics" / "metricas.csv"
 CORTE_OFICIAL_MIN = 330
 FRACCION_TEST_DIAS = 0.2
+
 FEATURES_NUM = [
-    "corte_min", "horas_acum", "taladros_acum", "metros_acum",
-    "rop_prom", "horas_restantes",
+    "horas_acum", "taladros_acum", "metros_acum",
+    "rop_prom", "metros_por_taladro", "total_taladros",
 ]
 FEATURES_CAT = ["equipo", "tipo", "zona", "turno", "dureza"]
+
 MODELOS = {
     "RegresionLineal": lambda: LinearRegression(),
     "RandomForest": lambda: RandomForestRegressor(
         n_estimators=300, min_samples_leaf=2, random_state=42, n_jobs=-1
     ),
-    "GradientBoosting": lambda: GradientBoostingRegressor(random_state=42),
+    "GradientBoosting": lambda: GradientBoostingRegressor(
+        n_estimators=300, max_depth=5, learning_rate=0.1, random_state=42
+    ),
     "RedNeuronal": lambda: make_pipeline(
         StandardScaler(),
         MLPRegressor(hidden_layer_sizes=(64, 32), max_iter=800, random_state=42),
@@ -82,13 +86,12 @@ def entrenar_objetivo(nombre, df, target):
         return None
     X_train = preparar_X(train)
     X_test = preparar_X(test)
-    common_cols = X_train.columns.intersection(X_test.columns)
-    if len(common_cols) < len(X_train.columns):
-        print(f"ADVERTENCIA: columnas no coinciden en '{nombre}'. Se reentrena con union.")
-        all_cols = X_train.columns.union(X_test.columns)
-        X_train = X_train.reindex(columns=all_cols, fill_value=0)
-        X_test = X_test.reindex(columns=all_cols, fill_value=0)
+    all_cols = X_train.columns.union(X_test.columns)
+    X_train = X_train.reindex(columns=all_cols, fill_value=0)
+    X_test = X_test.reindex(columns=all_cols, fill_value=0)
     y_train, y_test = train[target].values, test[target].values
+
+    print(f"\n[{nombre}] Train: {len(train)} filas | Test: {len(test)} filas | Features: {len(all_cols)}")
 
     resultados = {}
     mejor = None
@@ -98,11 +101,11 @@ def entrenar_objetivo(nombre, df, target):
             modelo.fit(X_train, y_train)
             m = evaluar(y_test, modelo.predict(X_test))
             resultados[nombre_modelo] = m
-            print(f"[{nombre}] {nombre_modelo}: {m}")
+            print(f"  {nombre_modelo:20s}: R2={m['R2']:.4f}  MAE={m['MAE']:.2f}  RMSE={m['RMSE']:.2f}  MAPE={m['MAPE']:.1f}%")
             if mejor is None or m["RMSE"] < resultados[mejor]["RMSE"]:
                 mejor = nombre_modelo
         except Exception as e:
-            print(f"[{nombre}] {nombre_modelo} falló: {e}")
+            print(f"  {nombre_modelo:20s}: FALLO - {e}")
 
     if mejor is None:
         print(f"ERROR: ningun modelo entreno bien para '{nombre}'.")
@@ -110,12 +113,13 @@ def entrenar_objetivo(nombre, df, target):
 
     modelo_final = MODELOS[mejor]()
     X_full = preparar_X(df)
+    all_cols_full = X_full.columns
     modelo_final.fit(X_full, df[target].values)
     ruta = MODELOS_DIR / f"modelo_{nombre}.pkl"
     joblib.dump(modelo_final, ruta)
     with open(MODELOS_DIR / f"columnas_{nombre}.json", "w") as f:
-        json.dump(list(X_train.columns), f)
-    print(f"Modelo '{nombre}' guardado: {ruta} via {mejor}")
+        json.dump(list(all_cols_full), f)
+    print(f"\n  >>> Modelo '{nombre}' guardado: {ruta} via {mejor}")
     return {
         "modelo": nombre, "target": target, "mejor_algoritmo": mejor,
         "metricas_test": json.dumps(resultados, ensure_ascii=False),
@@ -129,16 +133,23 @@ def main():
         print(f"ERROR: no existe {SNAPSHOTS}. Ejecuta generar_snapshots.py primero.")
         sys.exit(1)
     df = pd.read_csv(SNAPSHOTS)
+    print(f"Snapshots cargados: {len(df)} filas")
+    print(f"Fechas: {df['fecha'].min()} a {df['fecha'].max()}")
+    print(f"Equipos: {sorted(df['equipo'].unique())}")
+
     df_corte = df[df["corte_min"] <= CORTE_OFICIAL_MIN].dropna(subset=["metros_al_corte"])
     df_fin = df.dropna(subset=["metros_fin_turno"])
+
     filas = []
     r = entrenar_objetivo("corte", df_corte, "metros_al_corte")
     if r: filas.append(r)
     r = entrenar_objetivo("fin", df_fin, "metros_fin_turno")
     if r: filas.append(r)
+
     if not filas:
         print("ERROR: no se entreno ningun modelo.")
         sys.exit(1)
+
     hoy = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     salida = pd.DataFrame(filas)
     salida.insert(0, "fecha_entrenamiento", hoy)
@@ -149,7 +160,7 @@ def main():
         except Exception:
             pass
     salida.to_csv(METRICAS_PATH, index=False)
-    print("Metricas guardadas en:", METRICAS_PATH)
+    print("\nMetricas guardadas en:", METRICAS_PATH)
     print(salida.to_string())
 
 if __name__ == "__main__":
