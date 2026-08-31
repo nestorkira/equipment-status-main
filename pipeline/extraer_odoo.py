@@ -91,9 +91,9 @@ try:
     if df.empty:
         print("ERROR: no se recuperaron registros de Odoo")
         sys.exit(1)
-
     print("Columnas obtenidas:", list(df.columns))
-
+    for col in ["hour_from", "hour_to", "rop", "hardness", "high"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
     df = df[df["drill_code"].notna()]
     df = df[df["drill_code"] != False]
     df = df[df["drill_code"] != ""]

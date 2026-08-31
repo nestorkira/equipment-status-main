@@ -14,6 +14,9 @@ try:
         sys.exit(1)
 
     df_new = pd.read_csv(DETALLE)
+    for col in ["hour_from", "hour_to", "rop", "hardness", "high"]:
+        if col in df_new.columns:
+            df_new[col] = pd.to_numeric(df_new[col], errors="coerce")
     cols_faltantes = REQUIRED_COLS - set(df_new.columns)
     if cols_faltantes:
         print(f"ERROR: columnas faltantes en detalle: {cols_faltantes}")
