@@ -24,6 +24,9 @@ try:
 
     if HISTORICO.exists():
         df_hist = pd.read_csv(HISTORICO)
+        for col in ["hour_from", "hour_to", "rop", "hardness", "high"]:
+            if col in df_hist.columns:
+                df_hist[col] = pd.to_numeric(df_hist[col], errors="coerce")
         df = pd.concat([df_hist, df_new], ignore_index=True)
     else:
         df = df_new.copy()
@@ -32,6 +35,8 @@ try:
     df = df.sort_values(["date", "shift", "equipo", "hour_from"]).reset_index(drop=True)
     df.to_csv(HISTORICO, index=False)
 
+    for col in ["hour_from", "hour_to", "rop", "hardness", "high"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
     duracion = df["hour_to"] - df["hour_from"]
     df_tmp = df.assign(duracion=duracion.where(duracion >= 0, duracion + 24))
     resumen = (

@@ -73,9 +73,11 @@ try:
             right = safe_read_batch(model, ids_batch[mid:])
             return left + right
 
+    count = models.execute_kw(db, uid, password, MODELO_ODOO, "search_count", [domain])
+    print("Total registros:", count)
+
     inicio = time.time()
     ids = models.execute_kw(db, uid, password, MODELO_ODOO, "search", [domain])
-    print("Total registros:", len(ids))
 
     registros = []
     batch_size = 1000
@@ -92,15 +94,36 @@ try:
         print("ERROR: no se recuperaron registros de Odoo")
         sys.exit(1)
     print("Columnas obtenidas:", list(df.columns))
+
     for col in ["hour_from", "hour_to", "rop", "hardness", "high"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
     df = df[df["drill_code"].notna()]
     df = df[df["drill_code"] != False]
     df = df[df["drill_code"] != ""]
 
     ruta_detalle = DATA_DIR / "detalle_diario.csv"
     df.to_csv(ruta_detalle, index=False)
-    print("Detalle guardado en:", ruta_detalle, "| filas:", len(df))
+    print(f"Detalle guardado en: {ruta_detalle} | filas: {len(df)}")
+
+    duracion = df["hour_to"] - df["hour_from"]
+    df_tmp = df.assign(duracion=duracion.where(duracion >= 0, duracion + 24))
+    resumen = (
+        df_tmp.groupby(["date", "area", "equipo", "shift"], as_index=False)
+        .agg(
+            taladros=("id", "count"),
+            horas_trabajadas=("duracion", "sum"),
+            metros_fin_turno=("high", "sum"),
+            rop_promedio=("rop", "mean"),
+            dureza_promedio=("hardness", "mean"),
+        )
+    )
+    resumen["Horas Trabajadas"] = resumen["horas_trabajadas"].round(2)
+    resumen["Metros"] = resumen["metros_fin_turno"].round(2)
+    ruta_resumen = DATA_DIR / "resumen_diario.xlsx"
+    resumen.to_excel(ruta_resumen, index=False)
+    print(f"Resumen guardado en: {ruta_resumen} | filas: {len(resumen)}")
 
 except Exception as e:
     print("ERROR FATAL en extraer_odoo.py:")
