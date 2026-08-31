@@ -12,7 +12,15 @@ INICIO_TURNO = {"A": 6.5, "B": 18.5}
 DURACION_TURNO_MIN = 720
 CORTE_OFICIAL_MIN = 330
 CORTES_MIN = [60, 120, 180, 240, 300, 330, 360, 420, 480, 540, 600, 660]
-EQUIPOS_RTR = {"TD091", "TD092"}
+
+RTR_PREFIX = ("TD09",)  # TD091, TD092, TD093, etc. son RTR
+EQUIPOS_RTR_MANUAL = set()  # Agregar aqui equipos RTR que no sigan el patron
+
+def es_rtr(equipo):
+    equipo = str(equipo).upper().strip()
+    if equipo in EQUIPOS_RTR_MANUAL:
+        return True
+    return any(equipo.startswith(p) for p in RTR_PREFIX)
 
 def zona_de(area):
     area = str(area).upper()
@@ -42,7 +50,13 @@ try:
         sys.exit(1)
 
     df["zona"] = df["area"].apply(zona_de)
-    df["tipo"] = df["equipo"].apply(lambda x: "RTR" if x in EQUIPOS_RTR else "DTH")
+    df["tipo"] = df["equipo"].apply(lambda x: "RTR" if es_rtr(x) else "DTH")
+
+    equipos_info = df.groupby("equipo")["tipo"].first().to_dict()
+    print(f"Equipos detectados ({len(equipos_info)}):")
+    for eq, tp in sorted(equipos_info.items()):
+        print(f"  {eq}: {tp}")
+
     if "hardness" in df.columns:
         df["hardness"] = df["hardness"].fillna("N/A")
         df["hardness"] = df["hardness"].replace("False", "N/A")
