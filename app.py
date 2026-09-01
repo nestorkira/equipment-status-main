@@ -542,6 +542,88 @@ if file:
 
     df_proj["Metraje_proyectado (m)"] = df_proj.apply(metraje_proyectado, axis=1)
 
+    # --- Intento proyeccion ML con modelo_fin (HistGradientBoosting) ---
+    # Features: horas_acum, taladros_acum, metros_acum, rop_prom, metros_por_taladro, total_taladros + equipo/tipo/zona/turno/dureza
+    # Se activa solo desde 240min y si modelo cargado
+    ml_usado = False
+    if mostrar_proyeccion and modelo_fin is not None and columnas_fin is not None:
+        try:
+            # defaults por equipo desde Odoo detalle_limpio (ver pipeline/tmp_dureza.py)
+            EQUIPO_DEFAULTS = {
+                "TD012": {"dureza":"D","zona":"FERROBAMBA","rop":27.2},
+                "TD030": {"dureza":"D","zona":"FERROBAMBA","rop":32.2},
+                "TD072": {"dureza":"M","zona":"FERROBAMBA","rop":37.8},
+                "TD073": {"dureza":"D","zona":"CHALCOBAMBA","rop":36.4},
+                "TD074": {"dureza":"D","zona":"CHALCOBAMBA","rop":31.9},
+                "TD076": {"dureza":"D","zona":"FERROBAMBA","rop":29.0},
+                "TD077": {"dureza":"D","zona":"FERROBAMBA","rop":33.1},
+                "TD079": {"dureza":"D","zona":"FERROBAMBA","rop":37.7},
+                "TD080": {"dureza":"D","zona":"FERROBAMBA","rop":33.0},
+                "TD081": {"dureza":"M","zona":"CHALCOBAMBA","rop":37.0},
+                "TD082": {"dureza":"D","zona":"FERROBAMBA","rop":33.0},
+                "TD083": {"dureza":"D","zona":"FERROBAMBA","rop":33.0},
+                "TD091": {"dureza":"D","zona":"CHALCOBAMBA","rop":31.7},
+                "TD092": {"dureza":"D","zona":"FERROBAMBA","rop":30.6},
+            }
+            def zona_de_app(ub):
+                ub=str(ub).upper()
+                if "FERROBAMBA" in ub: return "FERROBAMBA"
+                if "CHALCOBAMBA" in ub: return "CHALCOBAMBA"
+                return "OTRO"
+            # zona por equipo desde excel Ubicacion
+            zona_por_equipo = df.groupby("Equipo")["Ubicacion"].apply(lambda s: zona_de_app(s.mode().iloc[0] if len(s.mode())>0 else ""))
+            turno_ml = "A" if turno=="T/D" else "B"
+            corte = int(minutos_transcurridos)
+            # clip corte a rango entrenado 60-660
+            corte = max(60, min(660, corte))
+            rows_ml=[]
+            for _, r in df_proj.iterrows():
+                eq=r["Equipo"]
+                horas_acum=float(r["Horas_operativas"])
+                # evita 0
+                if horas_acum<=0:
+                    taladros_acum=0
+                    metros_acum=0
+                else:
+                    # taladros estimados: horas / duracion_media 0.42h (25min)
+                    taladros_acum=int(round(horas_acum/0.42))
+                    metros_acum=float(r["Metraje_acum"]) if "Metraje_acum" in df_proj.columns else float(r["Metraje_proyectado (m)"] * r["Operatividad"] if r["Operatividad"]>0 else 0)
+                metros_por_taladro = float(metros_acum/max(1,taladros_acum)) if taladros_acum>0 else 0
+                oper = float(r["Operatividad"]) if r["Operatividad"]>0 else 0.1
+                total_taladros = int(round(taladros_acum/max(oper,0.1))) if taladros_acum>0 else int(round(horas_acum/0.42/0.4))
+                defs=EQUIPO_DEFAULTS.get(eq, {"dureza":"D","zona":"FERROBAMBA","rop":30})
+                zona = zona_por_equipo.get(eq, defs["zona"])
+                dureza=defs["dureza"]
+                tipo="RTR" if eq.startswith("TD09") else "DTH"
+                rows_ml.append({
+                    "horas_acum": round(horas_acum,3),
+                    "taladros_acum": taladros_acum,
+                    "metros_acum": round(metros_acum,2),
+                    "rop_prom": defs["rop"],
+                    "metros_por_taladro": round(metros_por_taladro,2),
+                    "total_taladros": total_taladros,
+                    "equipo": eq, "tipo": tipo, "zona": zona, "turno": turno_ml, "dureza": dureza,
+                    "corte_min": corte
+                })
+            X_ml = pd.DataFrame(rows_ml)
+            # preparar dummy como en entrenar.py
+            FEATURES_NUM_ML = ["horas_acum","taladros_acum","metros_acum","rop_prom","metros_por_taladro","total_taladros"]
+            FEATURES_CAT_ML = ["equipo","tipo","zona","turno","dureza"]
+            X_num = X_ml[FEATURES_NUM_ML].copy()
+            X_cat = pd.get_dummies(X_ml[FEATURES_CAT].astype(str), columns=FEATURES_CAT)
+            X_all = pd.concat([X_num, X_cat], axis=1)
+            X_all = X_all.reindex(columns=columnas_fin, fill_value=0)
+            pred = modelo_fin.predict(X_all)
+            df_proj["Metraje_ML (m)"] = np.round(pred,1)
+            # Equipos sin horas operativas -> 0 (evita baseline fantasma)
+            df_proj.loc[df_proj["Horas_operativas"]<=0, "Metraje_ML (m)"] = 0
+            # Reemplaza proyeccion lineal por ML si es razonable (0-800m)
+            df_proj["Metraje_proyectado (m)"] = df_proj["Metraje_ML (m)"].clip(0, 800)
+            ml_usado = True
+        except Exception as e:
+            # fallback lineal si falla ML
+            df_proj["Metraje_ML (m)"] = np.nan
+
     metraje_dth_proj = df_proj[
         ~df_proj["Equipo"].isin(["TD091", "TD092"])
     ]["Metraje_proyectado (m)"].sum()
@@ -697,10 +779,11 @@ if file:
             dth_proj_txt = f"<span style='font-size:32px;'>⏳</span><br><small style='color:{color_conf};'>{texto_conf} ({minutos_transcurridos}min / {UMBRAL_MIN}min)</small>"
             rtr_proj_txt = f"<span style='font-size:32px;'>⏳</span><br><small style='color:{color_conf};'>{texto_conf}</small>"
 
+        fuente = "ML HistGB" if ml_usado else "Lineal"
         st.markdown(
                 f"<div style='margin-top:-80px; margin-bottom:-5px;'>"
-                f"<h2 style='text-align:center; color:black; font-weight:700;'>PROYECCIÓN <span style='font-size:13px; color:{color_conf}; border:1px solid {color_conf}; padding:2px 6px; border-radius:6px;'>{texto_conf}</span></h2>"
-                f"<p style='text-align:center; font-size:11px; color:gray; margin-top:4px;'>Umbral 240min (10:30 T/D · 22:30 T/N) — Media R2 0.80 · Oficial 330min (12:00/00:00) — Alta R2 0.817 — Evolución R2 0.777→0.867 (60→660min)</p>",
+                f"<h2 style='text-align:center; color:black; font-weight:700;'>PROYECCIÓN <span style='font-size:13px; color:{color_conf}; border:1px solid {color_conf}; padding:2px 6px; border-radius:6px;'>{texto_conf}</span> <span style='font-size:11px; color:gray;'>({fuente})</span></h2>"
+                f"<p style='text-align:center; font-size:11px; color:gray; margin-top:4px;'>Umbral 240min (10:30 T/D · 22:30 T/N) — Media R2 0.80 · Oficial 330min (12:00/00:00) — Alta R2 0.817 — Evolución R2 0.777→0.867 (60→660min) · {fuente}</p>",
                 unsafe_allow_html=True
             )
 
